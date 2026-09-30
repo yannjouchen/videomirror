@@ -159,8 +159,9 @@ function buildFrame(){
   const src='https://www.facebook.com/plugins/video.php?href='+encodeURIComponent(fbUrl)+'&show_text=false&width='+w+'&height='+h;
   if(!f){
     f=document.createElement('iframe');
-    /* 不開放臉書自己的全螢幕，全螢幕時才不會失去鏡像 */
-    f.allow='autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share';
+    /* 要允許全螢幕：不允許的話，臉書在 iPhone 上會改用系統播放器，一播放就跳全螢幕、鏡像消失 */
+    f.allow='autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen';
+    f.allowFullscreen=true;
     flip.appendChild(f);
   }
   if(f.width==w&&f.height==h)return;
