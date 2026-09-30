@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>影片鏡像台</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* 版面：上方操作列 + 置中舞台，舞台是唯一的重點 */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --fg:#1b2430; --muted:#5d6b7c; --line:#d5dce4;
+  --accent:#1f6feb; --accent-fg:#ffffff; --stage:#0f141a;
+  --sans:"Noto Sans TC",system-ui,"PingFang TC","Microsoft JhengHei",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12171d; --panel:#1a2129; --fg:#e6ebf1; --muted:#95a3b3; --line:#2b3540;
+  --accent:#5b9dff; --accent-fg:#0b1220; --stage:#000000; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12171d; --panel:#1a2129; --fg:#e6ebf1; --muted:#95a3b3; --line:#2b3540;
+  --accent:#5b9dff; --accent-fg:#0b1220; --stage:#000000; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 var(--sans)}
+.wrap{max-width:980px;margin:0 auto;padding-inline:16px;padding-block:28px 48px;display:grid;gap:18px}
+h1{margin:0;font-size:1.5rem;font-weight:700;text-wrap:balance}
+.sub{margin:4px 0 0;color:var(--muted)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:12px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+input[type=url]{flex:1 1 280px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+button,.filebtn{padding:9px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-weight:500;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+button:focus-visible,input:focus-visible,.filebtn:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.filebtn input{display:none}
+.label{font-size:.78rem;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
+.msg{margin:0;color:var(--muted);font-size:.9rem}
+.msg.err{color:#d23b3b}
+.stage{background:var(--stage);border-radius:10px;display:grid;place-items:center;min-height:320px;overflow:hidden;padding:12px}
+.flip{transition:transform .25s ease;display:grid;place-items:center;max-width:100%}
+.stage iframe{border:0;display:block;max-width:100%;background:#000}
+.stage video{display:block;max-width:100%;max-height:75vh}
+.empty{color:#8b98a8;text-align:center;padding:40px 16px}
+.state{font-family:var(--mono);font-size:.82rem;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.flip{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>影片鏡像台</h1>
+    <p class="sub">貼上臉書影片網址（或選一個本機影片），一鍵左右／上下翻轉。</p>
+  </header>
+
+  <section class="panel">
+    <span class="label">臉書影片網址</span>
+    <div class="row">
+      <input id="url" type="url" placeholder="https://www.facebook.com/…/videos/… 或 /reel/…">
+      <button id="load" class="primary">載入</button>
+      <label class="filebtn">或選本機影片<input id="file" type="file" accept="video/*"></label>
+    </div>
+    <p id="msg" class="msg">直接在頁面任何地方按 Ctrl+V / ⌘V 也能貼上網址。</p>
+  </section>
+
+  <section class="panel">
+    <div class="row">
+      <button id="fh" aria-pressed="true">左右鏡像</button>
+      <button id="fv" aria-pressed="false">上下翻轉</button>
+      <span class="state" id="state">scaleX(-1)</span>
+    </div>
+    <div class="stage">
+      <div class="flip" id="flip">
+        <div class="empty" id="empty">影片會顯示在這裡</div>
+      </div>
+    </div>
+    <p class="msg">提示：臉書影片的播放按鈕也會一起被鏡像，這是正常的。只有「公開」的影片可以嵌入。</p>
+  </section>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const flip=$('flip'), msg=$('msg');
+let h=true, v=false, objUrl=null;
+
+function applyFlip(){
+  const t=`scale(${h?-1:1},${v?-1:1})`;
+  flip.style.transform=t;
+  $('fh').setAttribute('aria-pressed',h);
+  $('fv').setAttribute('aria-pressed',v);
+  $('state').textContent=(h||v)?t:'原始方向';
+}
+$('fh').onclick=()=>{h=!h;applyFlip()};
+$('fv').onclick=()=>{v=!v;applyFlip()};
+
+function say(t,err){msg.textContent=t;msg.className='msg'+(err?' err':'')}
+
+function clearStage(){
+  if(objUrl){URL.revokeObjectURL(objUrl);objUrl=null}
+  flip.innerHTML='';
+}
+
+function loadFb(raw){
+  let u=(raw||'').trim();
+  if(!u){say('請先貼上網址',true);return}
+  if(!/^https?:\/\//i.test(u)) u='https://'+u;
+  let host;
+  try{host=new URL(u).hostname}catch{say('網址格式不對，請確認後再貼一次',true);return}
+  if(!/(^|\.)(facebook\.com|fb\.watch|fb\.com)$/i.test(host)){say('這不是臉書網址',true);return}
+  const isReel=/\/reel\//i.test(u);
+  const w=Math.min(isReel?360:720, flip.parentElement.clientWidth-24);
+  const hgt=isReel?Math.round(w*16/9):Math.round(w*9/16);
+  clearStage();
+  const f=document.createElement('iframe');
+  f.src='https://www.facebook.com/plugins/video.php?href='+encodeURIComponent(u)+'&show_text=false&width='+w;
+  f.width=w; f.height=hgt;
+  f.allow='autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share';
+  f.allowFullscreen=true;
+  flip.appendChild(f);
+  say(/fb\.watch/i.test(host)?'已載入。fb.watch 短網址有時無法嵌入，若沒畫面請改用完整網址。':'已載入。若沒畫面，可能是影片非公開。');
+}
+
+$('load').onclick=()=>loadFb($('url').value);
+$('url').addEventListener('keydown',e=>{if(e.key==='Enter')loadFb($('url').value)});
+document.addEventListener('paste',e=>{
+  if(e.target===$('url'))return setTimeout(()=>loadFb($('url').value),0);
+  const t=(e.clipboardData||window.clipboardData).getData('text');
+  if(t){$('url').value=t;loadFb(t)}
+});
+
+$('file').onchange=e=>{
+  const file=e.target.files[0]; if(!file)return;
+  clearStage();
+  objUrl=URL.createObjectURL(file);
+  const vd=document.createElement('video');
+  vd.src=objUrl; vd.controls=true; vd.playsInline=true;
+  flip.appendChild(vd);
+  say('已載入本機影片：'+file.name);
+};
+
+applyFlip();
+</script>
+</body>
+</html>
