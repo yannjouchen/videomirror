@@ -23,10 +23,9 @@ button,.filebtn{padding:8px 12px;border-radius:8px;border:1px solid var(--line);
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 button:focus-visible,input:focus-visible,.filebtn:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 .filebtn input{display:none}
-.msg{flex-basis:100%;margin:0;color:var(--muted);font-size:.85rem}
-.msg.err{color:var(--err)}
-.sharebox{flex-basis:100%;display:flex;gap:8px}
-.sharebox input{flex:1;min-width:0;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#0d1117;color:var(--fg);font:inherit;font-size:.85rem}
+.toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:3;max-width:calc(100% - 32px);padding:8px 14px;border-radius:8px;background:rgba(22,27,34,.9);color:var(--fg);font-size:.9rem;text-align:center;opacity:0;pointer-events:none;transition:opacity .25s}
+.toast.show{opacity:1}
+.toast.err{color:var(--err)}
 .shape{display:none;gap:0}
 .shape.on{display:inline-flex}
 .shape button{border-radius:0}
@@ -57,17 +56,13 @@ button:focus-visible,input:focus-visible,.filebtn:focus-within{outline:2px solid
   </span>
   <label class="filebtn">本機影片<input id="file" type="file" accept="video/*"></label>
   <button id="share" hidden>分享連結</button>
-  <p id="msg" class="msg">在頁面任何地方按 Ctrl+V / ⌘V 也能直接貼上網址。影片會自動鏡像。</p>
-  <div class="sharebox" id="sharebox" hidden>
-    <input id="shareurl" type="text" readonly aria-label="分享連結">
-    <button id="copy" class="primary">複製</button>
-  </div>
 </header>
 
 <main class="stage" id="stage">
   <div class="flip" id="flip">
     <div class="empty">貼上網址或選擇本機影片，影片會鋪滿這裡</div>
   </div>
+  <div class="toast" id="msg" role="status" aria-live="polite"></div>
   <button class="zoom" id="zoom" aria-label="全螢幕">⤢ 全螢幕</button>
 </main>
 
@@ -76,11 +71,16 @@ const $=id=>document.getElementById(id);
 const flip=$('flip'), msg=$('msg'), stage=$('stage'), zoom=$('zoom');
 let fbUrl=null, portrait=false, objUrl=null;
 
-function say(t,err){msg.textContent=t;msg.className='msg'+(err?' err':'')}
+/* 短暫提示，幾秒後自動消失 */
+let tt;
+function say(t,err){
+  msg.textContent=t;msg.className='toast show'+(err?' err':'');
+  clearTimeout(tt);tt=setTimeout(()=>msg.classList.remove('show'),err?4000:2500);
+}
 function clearStage(){
   if(objUrl){URL.revokeObjectURL(objUrl);objUrl=null}
   flip.innerHTML='';fbUrl=null;
-  $('share').hidden=true;$('sharebox').hidden=true;
+  $('share').hidden=true;
 }
 
 /* 依播放區大小，放一個最大的橫式或直式臉書播放器 */
@@ -113,7 +113,7 @@ function loadFb(raw,startPortrait){
   $('url').value=u;
   setShape(!!startPortrait); /* 預設橫式；影片若是直的，按「直式」 */
   $('shape').classList.add('on');
-  say('已載入並鏡像。如果畫面上下有很多黑邊，切換「橫式／直式」即可鋪滿。沒畫面的話，可能是影片非公開。');
+  say('已載入並鏡像');
 }
 
 function setShape(p){
@@ -134,21 +134,22 @@ function saveToAddress(){
   if(!fbUrl)return;
   try{history.replaceState(null,'',shareLink())}catch{}
   $('share').hidden=false;
-  $('shareurl').value=shareLink();
+}
+/* 分享：手機跳出分享選單；不支援時直接複製連結 */
+function copyText(t){
+  const ta=document.createElement('textarea');
+  ta.value=t;ta.setAttribute('readonly','');ta.style.cssText='position:fixed;opacity:0;top:0;left:0';
+  document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,t.length);
+  let ok=false;try{ok=document.execCommand('copy')}catch{}
+  ta.remove();return ok;
 }
 $('share').onclick=async()=>{
   const link=shareLink();
   if(navigator.share&&/^https?:/.test(location.protocol)){
     try{await navigator.share({title:'鏡像影片',url:link});return}catch(e){if(e.name==='AbortError')return}
   }
-  $('shareurl').value=link;
-  $('sharebox').hidden=!$('sharebox').hidden;
-  if(!$('sharebox').hidden)$('shareurl').select();
-};
-$('copy').onclick=async()=>{
-  const inp=$('shareurl');
-  try{await navigator.clipboard.writeText(inp.value);say('已複製分享連結，貼給朋友就能直接看鏡像影片。')}
-  catch{inp.focus();inp.select();say('請按 Ctrl+C / ⌘C 複製已選取的連結。')}
+  try{await navigator.clipboard.writeText(link);say('已複製分享連結')}
+  catch{const ok=copyText(link);say(ok?'已複製分享連結':'無法自動複製，請直接複製瀏覽器網址列的網址',!ok)}
 };
 if(location.protocol==='file:')
   $('share').title='提醒：這個網頁目前是存在你電腦裡的檔案，要先放到網路上，別人才打得開分享連結';
@@ -176,7 +177,7 @@ $('file').onchange=e=>{
   vd.disablePictureInPicture=true;
   flip.appendChild(vd);
   try{history.replaceState(null,'',location.href.split('?')[0])}catch{}
-  say('已載入並鏡像：'+file.name+'（本機影片只在你的裝置上播放，無法分享連結）');
+  say('已載入並鏡像');
 };
 
 /* 全螢幕：對整個播放區，鏡像會保留；iPhone 不支援時改成鋪滿整頁 */
@@ -208,7 +209,6 @@ let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(buil
   const v=q.get('v');
   if(v){
     loadFb(v,q.get('s')==='p');
-    say('這是分享給你的鏡像影片，按播放鍵即可觀看。');
   }
 })();
 </script>
