@@ -55,7 +55,7 @@ button.off{opacity:.4;cursor:not-allowed}
 .tap.paused .big-play,.tap.paused.mirrored .cover{opacity:1}
 .tap.local{clip-path:none}
 .flip{position:relative}
-.fbwrap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);transform-origin:center}
+.fbwrap{position:absolute;left:50%;top:50%;width:max-content;transform:translate(-50%,-50%);transform-origin:center}
 .fbwrap iframe{display:block}
 .tap.local .cover{display:none}
 /* 操作列在影片下方，不蓋住影片 */
@@ -197,7 +197,7 @@ function fbIframe(){
 }
 
 /* ===== 臉書（電腦、Android）：蓋住臉書的按鈕，改用下方操作列控制，只鏡像畫面 ===== */
-let fbMode=null, fbPlayer=null, fbPlaying=false, fbSeq=0, fbSubs=[], fbSdk=null;
+let fbAlive=false, fbMode=null, fbPlayer=null, fbPlaying=false, fbSeq=0, fbSubs=[], fbSdk=null;
 function loadFbSdk(){
   if(fbSdk)return fbSdk;
   fbSdk=new Promise((res,rej)=>{
@@ -235,14 +235,15 @@ function fbCreate(){
 }
 function fbFallback(){
   const w=$('fbwrap');if(w)w.remove();
-  fbSeq++;fbMode=null;
+  fbTeardown();showUi(false);
   fbIframe();
 }
 function onFbReady(m){
   if(m.type!=='video'||m.id!=='fbv'+fbSeq||fbMode!=='sdk')return;
   fbPlayer=m.instance;fbPlaying=false;
   const on=(ev,fn)=>{try{fbSubs.push(fbPlayer.subscribe(ev,fn))}catch{}};
-  on('startedPlaying',()=>{fbPlaying=true;sync()});
+  on('startedPlaying',()=>{fbPlaying=true;fbAlive=true;sync()});
+  on('startedBuffering',()=>{fbAlive=true});
   on('paused',()=>{fbPlaying=false;sync()});
   on('finishedPlaying',()=>{fbPlaying=false;try{fbPlayer.seek(0)}catch{};sync()});
   on('error',()=>say('臉書無法播放這支影片，可能是影片非公開',true));
@@ -254,7 +255,13 @@ function onFbReady(m){
 function fbAdapter(pl){
   return{
     playing:()=>fbPlaying,
-    play:()=>pl.play(),pause:()=>pl.pause(),
+    play:()=>{
+      fbAlive=false;pl.play();
+      setTimeout(()=>{
+        if(fbPlayer===pl&&!fbAlive){say('臉書播放器沒有回應，已改用臉書原本的播放器',true);fbFallback()}
+      },6000);
+    },
+    pause:()=>pl.pause(),
     dur:()=>pl.getDuration()||0,cur:()=>pl.getCurrentPosition()||0,
     seek:t=>pl.seek(t),
     muted:()=>pl.isMuted(),toggleMute:()=>pl.isMuted()?pl.unmute():pl.mute(),
@@ -266,6 +273,7 @@ function fbFit(){
   const w=$('fbwrap');if(!w)return;
   const f=w.querySelector('iframe');if(!f)return;
   const fw=f.offsetWidth,fh=f.offsetHeight;if(!fw||!fh)return;
+  w.style.width=fw+'px';w.style.height=fh+'px';
   const k=Math.min(view.clientWidth/fw,view.clientHeight/fh);
   w.style.transform='translate(-50%,-50%) scale('+k+')';
 }
