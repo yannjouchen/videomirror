@@ -52,6 +52,8 @@ button.off{opacity:.4;cursor:not-allowed}
 .tap .big-play{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;background:rgba(0,0,0,.6);display:grid;place-items:center;opacity:0;transition:opacity .2s}
 .tap .big-play svg{width:34px;height:34px;fill:#fff;margin-left:4px}
 .tap.paused .big-play,.tap.paused.mirrored .cover{opacity:1}
+.tap.local{clip-path:none}
+.tap.local .cover{display:none}
 /* 操作列在影片下方，不蓋住影片 */
 .ctl{flex:none;display:flex;flex-wrap:nowrap;align-items:center;gap:8px;transition:opacity .3s;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));background:var(--bar);border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
 .ctl button,.ctl select{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:#21262d;color:#fff;font:inherit;font-size:.9rem}
@@ -125,7 +127,7 @@ let fbUrl=null, ytId=null, ytStart=0, portrait=false, objUrl=null;
 let tt;
 function say(t,err){
   msg.textContent=t;msg.className='toast show'+(err?' err':'');
-  clearTimeout(tt);tt=setTimeout(()=>msg.classList.remove('show'),err?4000:2500);
+  clearTimeout(tt);tt=setTimeout(()=>msg.classList.remove('show'),err?6000:2500);
 }
 function clearStage(){
   if(objUrl){URL.revokeObjectURL(objUrl);objUrl=null}
@@ -173,7 +175,8 @@ function loadFb(raw,startPortrait){
   $('url').value=u;
   setShape(!!startPortrait); /* 預設橫式；影片若是直的，按「直式」 */
   $('shape').classList.add('on');
-  say('已載入並鏡像');
+  const iOS=/iP(hone|od|ad)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  say(iOS?'提醒：iPhone 播放臉書影片時，系統會自動全螢幕並取消鏡像，建議下載影片後用「本機影片」播放':'已載入並鏡像',iOS);
 }
 
 /* YouTube：支援 watch?v=、youtu.be/、/shorts/、/embed/、/live/，以及 t= 開始時間 */
@@ -206,7 +209,7 @@ function loadYt(u){
 let srcForShare=null;
 
 /* ===== YouTube：只鏡像畫面，YouTube 自己的按鈕全部隱藏，改用下方不鏡像的操作列 ===== */
-let ytPlayer=null, ytTimer=null, ytSeeking=false, ytApi=null;
+let ytPlayer=null, ytApi=null;
 const ICON={
   play:'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
   pause:'<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
@@ -235,38 +238,66 @@ async function ytCreate(){
     host:'https://www.youtube.com',
     playerVars:{controls:0,disablekb:1,fs:0,rel:0,playsinline:1,iv_load_policy:3,modestbranding:1,start:start||0,origin:location.origin},
     events:{
-      onReady:()=>{ytShowUi(true);ytSync();ytTimer=setInterval(ytSync,250)},
+      onReady:()=>{P=ytAdapter(ytPlayer);showUi(true,'yt');sync()},
       onStateChange:e=>{
         if(e.data===YT.PlayerState.ENDED){ytPlayer.seekTo(0,true);ytPlayer.pauseVideo()} /* 避免結尾出現推薦影片 */
-        ytSync();
+        sync();
       },
       onError:e=>{say(e.data===101||e.data===150?'這支影片的上傳者不允許嵌入播放':'YouTube 無法播放這支影片',true)}
     }
   });
 }
-function ytShowUi(on){
+/* 下方操作列透過 P 控制目前的播放器（YouTube 或本機影片） */
+let P=null, seeking=false, syncTimer=null;
+function showUi(on,kind){
   $('tap').hidden=!on;$('ytbar').hidden=!on;
+  $('tap').classList.toggle('local',kind==='local');
+  clearInterval(syncTimer);syncTimer=on?setInterval(sync,250):null;
+  if(!on)P=null;
 }
 function ytTeardown(){
-  clearInterval(ytTimer);ytTimer=null;
   if(ytPlayer&&ytPlayer.destroy){try{ytPlayer.destroy()}catch{}}
-  ytPlayer=null;ytShowUi(false);
+  ytPlayer=null;showUi(false);
 }
-function ytPlaying(){return ytPlayer&&ytPlayer.getPlayerState&&ytPlayer.getPlayerState()===YT.PlayerState.PLAYING}
-function ytSync(){
-  if(!ytPlayer||!ytPlayer.getDuration)return;
-  const d=ytPlayer.getDuration()||0,c=ytPlayer.getCurrentTime()||0,p=ytPlaying();
+function ytAdapter(pl){
+  return{
+    playing:()=>pl.getPlayerState&&pl.getPlayerState()===YT.PlayerState.PLAYING,
+    play:()=>pl.playVideo(),pause:()=>pl.pauseVideo(),
+    dur:()=>pl.getDuration()||0,cur:()=>pl.getCurrentTime()||0,
+    seek:t=>pl.seekTo(t,true),
+    muted:()=>pl.isMuted(),toggleMute:()=>pl.isMuted()?pl.unMute():pl.mute(),
+    rate:r=>pl.setPlaybackRate(r)
+  };
+}
+function videoAdapter(v){
+  return{
+    playing:()=>!v.paused&&!v.ended,
+    play:()=>{const x=v.play();if(x&&x.catch)x.catch(()=>{})},pause:()=>v.pause(),
+    dur:()=>isFinite(v.duration)?v.duration:0,cur:()=>v.currentTime||0,
+    seek:t=>{v.currentTime=t},
+    muted:()=>v.muted,toggleMute:()=>{v.muted=!v.muted},
+    rate:r=>{v.playbackRate=r}
+  };
+}
+function sync(){
+  if(!P)return;
+  const d=P.dur(),c=P.cur(),p=P.playing();
   $('ytdur').textContent=fmt(d);
-  if(!ytSeeking){$('ytcur').textContent=fmt(c);$('ytseek').value=d?Math.round(c/d*1000):0}
+  if(!seeking){$('ytcur').textContent=fmt(c);$('ytseek').value=d?Math.round(c/d*1000):0}
   $('ytplay').innerHTML=p?ICON.pause:ICON.play;
   $('ytplay').setAttribute('aria-label',p?'暫停':'播放');
   $('tap').classList.toggle('paused',!p);
-  const m=ytPlayer.isMuted();
+  const m=P.muted();
   $('ytmute').innerHTML=m?ICON.mute:ICON.vol;
   $('ytmute').setAttribute('aria-label',m?'取消靜音':'靜音');
 }
-function ytToggle(){if(!ytPlayer)return;ytPlaying()?ytPlayer.pauseVideo():ytPlayer.playVideo();setTimeout(ytSync,80)}
-$('tap').onclick=ytToggle;
+function toggle(){if(!P)return;P.playing()?P.pause():P.play();setTimeout(sync,80)}
+$('tap').onclick=toggle;
+$('ytplay').onclick=toggle;
+$('ytmute').onclick=()=>{if(!P)return;P.toggleMute();setTimeout(sync,80)};
+$('ytspeed').onchange=e=>{if(P)P.rate(+e.target.value)};
+$('ytseek').oninput=e=>{seeking=true;const d=P?P.dur():0;$('ytcur').textContent=fmt(d*e.target.value/1000)};
+$('ytseek').onchange=e=>{if(P)P.seek(P.dur()*e.target.value/1000);seeking=false;setTimeout(sync,120)};
 
 /* 暫停鏡像：想看字幕或原本文字時，畫面暫時轉回正常方向 */
 let mirrored=true;
@@ -280,12 +311,6 @@ $('mirror').onclick=()=>{
   $('mirror').title=mirrored?'暫停鏡像':'恢復鏡像';
   say(mirrored?'已恢復鏡像':'已暫停鏡像，畫面為正常方向');
 };
-$('ytplay').onclick=ytToggle;
-$('ytmute').onclick=()=>{if(!ytPlayer)return;ytPlayer.isMuted()?ytPlayer.unMute():ytPlayer.mute();setTimeout(ytSync,80)};
-$('ytspeed').onchange=e=>{if(ytPlayer)ytPlayer.setPlaybackRate(+e.target.value)};
-$('ytseek').oninput=e=>{ytSeeking=true;const d=ytPlayer?ytPlayer.getDuration():0;$('ytcur').textContent=fmt(d*e.target.value/1000)};
-$('ytseek').onchange=e=>{if(ytPlayer)ytPlayer.seekTo(ytPlayer.getDuration()*e.target.value/1000,true);ytSeeking=false;setTimeout(ytSync,120)};
-
 
 function setShape(p){
   portrait=p;
@@ -345,12 +370,14 @@ $('file').onchange=e=>{
   $('shape').classList.remove('on');
   objUrl=URL.createObjectURL(file);
   const vd=document.createElement('video');
-  vd.src=objUrl;vd.controls=true;vd.playsInline=true;
+  /* 不用瀏覽器內建控制列（iPhone 按播放會跳全螢幕並取消鏡像），改用下方操作列 */
+  vd.src=objUrl;vd.controls=false;vd.playsInline=true;vd.preload='metadata';
   vd.setAttribute('playsinline','');vd.setAttribute('webkit-playsinline','');
-  /* 關掉影片內建全螢幕，改用右下角按鈕，鏡像才不會消失 */
-  vd.setAttribute('controlsList','nofullscreen');
   vd.disablePictureInPicture=true;
+  vd.addEventListener('ended',()=>{vd.currentTime=0;sync()});
   flip.appendChild(vd);
+  $('ytspeed').value='1';
+  P=videoAdapter(vd);showUi(true,'local');sync();
   try{history.replaceState(null,'',location.href.split('?')[0])}catch{}
   say('已載入並鏡像');
 };
