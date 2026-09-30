@@ -53,17 +53,25 @@ button.off{opacity:.4;cursor:not-allowed}
 .tap .big-play svg{width:34px;height:34px;fill:#fff;margin-left:4px}
 .tap.paused .big-play,.tap.paused.mirrored .cover{opacity:1}
 /* 操作列在影片下方，不蓋住影片 */
-.ctl{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));background:var(--bar);border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+.ctl{flex:none;display:flex;flex-wrap:nowrap;align-items:center;gap:8px;transition:opacity .3s;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));background:var(--bar);border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
 .ctl button,.ctl select{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:#21262d;color:#fff;font:inherit;font-size:.9rem}
 .ctl .icon{width:40px;height:36px;padding:0;display:grid;place-items:center}
 .ctl .icon svg{width:20px;height:20px;fill:#fff}
-.ytonly{display:flex;align-items:center;gap:8px 10px;flex:1 1 320px;min-width:0}
+.ytonly{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0}
 .ytonly[hidden]{display:none!important}
 .ctl input[type=range]{flex:1;min-width:80px;accent-color:#ff3b30;height:28px}
 .ctl .time{color:#dfe5ea;font-size:.85rem;white-space:nowrap}
-.ctl .right{display:flex;gap:8px;margin-left:auto}
-#mirror[aria-pressed=false]{background:#5a3b12;border-color:#b7791f}
-@media (max-width:520px){.bar h1{display:none}.ctl{padding-inline:10px}.ctl .time .dur{display:none}}
+.ctl .right{display:flex;gap:8px;margin-left:auto;flex:none}
+.ctl select{padding:7px 4px;width:58px}
+.stage.big .view,.stage:fullscreen .view{position:absolute;inset:0}
+.stage:fullscreen{position:relative}
+.stage.big .ctl,.stage:fullscreen .ctl{position:absolute;left:0;right:0;bottom:0;z-index:4;border-top:0;background:linear-gradient(transparent,rgba(0,0,0,.82) 40%);padding-top:22px}
+.stage:-webkit-full-screen .view{position:absolute;inset:0}
+.stage:-webkit-full-screen{position:relative}
+.stage:-webkit-full-screen .ctl{position:absolute;left:0;right:0;bottom:0;z-index:4;border-top:0;background:linear-gradient(transparent,rgba(0,0,0,.82) 40%);padding-top:22px}
+.ctl.hide{opacity:0;pointer-events:none}
+#mirror[aria-pressed=false]{background:#8a5a14;border-color:#e0a030}
+@media (max-width:520px){.bar h1{display:none}.ctl{padding-inline:10px;gap:6px}.ytonly{gap:6px}.ctl .time .dur{display:none}.ctl .icon{width:38px}}
 </style>
 </head>
 <body>
@@ -102,8 +110,8 @@ button.off{opacity:.4;cursor:not-allowed}
       </select>
     </span>
     <span class="right">
-      <button id="mirror" aria-pressed="true">暫停鏡像</button>
-      <button id="zoom" aria-label="全螢幕">⤢ 全螢幕</button>
+      <button class="icon" id="mirror" aria-pressed="true" aria-label="暫停鏡像" title="暫停鏡像"><svg viewBox="0 0 24 24"><path d="M11 2h2v20h-2zM9 6v12L3 18zM15 6l6 12h-6z" /></svg></button>
+      <button class="icon" id="zoom" aria-label="全螢幕" title="全螢幕"></button>
     </span>
   </div>
 </main>
@@ -268,7 +276,8 @@ $('mirror').onclick=()=>{
   $('tap').classList.toggle('mirrored',mirrored);
   $('tap').classList.toggle('normal',!mirrored);
   $('mirror').setAttribute('aria-pressed',mirrored);
-  $('mirror').textContent=mirrored?'暫停鏡像':'恢復鏡像';
+  $('mirror').setAttribute('aria-label',mirrored?'暫停鏡像':'恢復鏡像');
+  $('mirror').title=mirrored?'暫停鏡像':'恢復鏡像';
   say(mirrored?'已恢復鏡像':'已暫停鏡像，畫面為正常方向');
 };
 $('ytplay').onclick=ytToggle;
@@ -347,12 +356,25 @@ $('file').onchange=e=>{
 };
 
 /* 全螢幕：對整個播放區，鏡像會保留；iPhone 不支援時改成鋪滿整頁 */
+const ZIN='<svg viewBox="0 0 24 24"><path d="M4 4h6v2H6v4H4zM14 4h6v6h-2V6h-4zM4 14h2v4h4v2H4zM18 14h2v6h-6v-2h4z"/></svg>';
+const ZOUT='<svg viewBox="0 0 24 24"><path d="M8 4h2v6H4V8h4zM14 4h2v4h4v2h-6zM4 14h6v6H8v-4H4zM14 14h6v2h-4v4h-2z"/></svg>';
+zoom.innerHTML=ZIN;
+/* 全螢幕時操作列浮在畫面下緣，3 秒沒操作就隱藏（才不會擋住略過廣告）；點畫面會再出現 */
+const ctl=document.querySelector('.ctl');let ht;
+function showCtl(){
+  ctl.classList.remove('hide');clearTimeout(ht);
+  if(isBig())ht=setTimeout(()=>{if(isBig())ctl.classList.add('hide')},3000);
+}
+view.addEventListener('pointerdown',showCtl,true);
+ctl.addEventListener('pointerdown',showCtl,true);
+ctl.addEventListener('input',showCtl,true);
 const fsEl=()=>document.fullscreenElement||document.webkitFullscreenElement;
 const isBig=()=>fsEl()===stage||stage.classList.contains('big');
 function updateZoom(){
   const b=isBig();
-  zoom.textContent=b?'⤡ 離開全螢幕':'⤢ 全螢幕';
-  zoom.setAttribute('aria-label',b?'離開全螢幕':'全螢幕');
+  zoom.innerHTML=b?ZOUT:ZIN;
+  zoom.setAttribute('aria-label',b?'離開全螢幕':'全螢幕');zoom.title=b?'離開全螢幕':'全螢幕';
+  showCtl();
   setTimeout(buildFrame,120);
 }
 zoom.onclick=()=>{
