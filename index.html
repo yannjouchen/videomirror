@@ -55,8 +55,6 @@ button.off{opacity:.4;cursor:not-allowed}
 .tap.paused .big-play,.tap.paused.mirrored .cover{opacity:1}
 .tap.local{clip-path:none}
 .flip{position:relative}
-.fbwrap{position:absolute;left:50%;top:50%;width:max-content;transform:translate(-50%,-50%);transform-origin:center}
-.fbwrap iframe{display:block}
 .tap.local .cover{display:none}
 /* 操作列在影片下方，不蓋住影片 */
 .ctl{flex:none;min-width:0;max-width:100%;overflow:hidden;display:flex;flex-wrap:nowrap;align-items:center;gap:8px;transition:opacity .3s;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));background:var(--bar);border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
@@ -154,7 +152,6 @@ function buildFrame(){
     if(ytPlayer&&ytPlayer.setSize)ytPlayer.setSize(view.clientWidth,view.clientHeight);
     return;
   }
-  if(fbMode==='sdk'){fbFit();return}
   if(!fbUrl)return;
   const W=view.clientWidth, H=view.clientHeight, r=portrait?16/9:9/16; /* r = 高/寬 */
   let w=W, h=Math.round(W*r);
@@ -184,9 +181,7 @@ function loadFb(raw,startPortrait){
   fbUrl=u;
   $('url').value=u;
   portrait=!!startPortrait;
-  if(IOS){fbIframe();return}  /* iPhone：臉書影片一播放就會被系統全螢幕，只能用臉書原本的播放器 */
-  fbCreate();
-  saveToAddress();
+  fbIframe(); /* 臉書一律使用臉書原本的播放器（手機、電腦都能正常播放） */
 }
 /* 臉書原本的播放器（按鈕在影片上，會跟著鏡像） */
 function fbIframe(){
@@ -196,92 +191,8 @@ function fbIframe(){
   say('已載入並鏡像');
 }
 
-/* ===== 臉書（電腦、Android）：蓋住臉書的按鈕，改用下方操作列控制，只鏡像畫面 ===== */
-let fbAlive=false, fbMode=null, fbPlayer=null, fbPlaying=false, fbSeq=0, fbSubs=[], fbSdk=null;
-function loadFbSdk(){
-  if(fbSdk)return fbSdk;
-  fbSdk=new Promise((res,rej)=>{
-    if(window.FB&&FB.XFBML)return res();
-    window.fbAsyncInit=()=>{
-      FB.init({xfbml:false,version:'v21.0'});
-      FB.Event.subscribe('xfbml.ready',onFbReady);
-      res();
-    };
-    if(!$('fb-root')){const r=document.createElement('div');r.id='fb-root';document.body.prepend(r)}
-    const sc=document.createElement('script');
-    sc.src='https://connect.facebook.net/zh_TW/sdk.js';sc.async=true;sc.crossOrigin='anonymous';
-    sc.onerror=()=>{fbSdk=null;rej()};
-    document.body.appendChild(sc);
-  });
-  return fbSdk;
-}
-function fbCreate(){
-  const seq=++fbSeq;
-  fbMode='sdk';
-  $('shape').classList.remove('on');
-  const wrap=document.createElement('div');wrap.className='fbwrap';wrap.id='fbwrap';
-  const d=document.createElement('div');
-  d.className='fb-video';d.id='fbv'+seq;
-  d.setAttribute('data-href',fbUrl);
-  d.setAttribute('data-width','720');
-  d.setAttribute('data-show-text','false');
-  d.setAttribute('data-allowfullscreen','false');
-  d.setAttribute('data-autoplay','false');
-  wrap.appendChild(d);flip.appendChild(wrap);
-  say('載入中…');
-  /* 臉書工具沒有回應時，改用臉書原本的播放器 */
-  setTimeout(()=>{if(seq===fbSeq&&!fbPlayer)fbFallback()},10000);
-  loadFbSdk().then(()=>{if(seq===fbSeq)FB.XFBML.parse(wrap)}).catch(()=>{if(seq===fbSeq)fbFallback()});
-}
-function fbFallback(){
-  const w=$('fbwrap');if(w)w.remove();
-  fbTeardown();showUi(false);
-  fbIframe();
-}
-function onFbReady(m){
-  if(m.type!=='video'||m.id!=='fbv'+fbSeq||fbMode!=='sdk')return;
-  fbPlayer=m.instance;fbPlaying=false;
-  const on=(ev,fn)=>{try{fbSubs.push(fbPlayer.subscribe(ev,fn))}catch{}};
-  on('startedPlaying',()=>{fbPlaying=true;fbAlive=true;sync()});
-  on('startedBuffering',()=>{fbAlive=true});
-  on('paused',()=>{fbPlaying=false;sync()});
-  on('finishedPlaying',()=>{fbPlaying=false;try{fbPlayer.seek(0)}catch{};sync()});
-  on('error',()=>say('臉書無法播放這支影片，可能是影片非公開',true));
-  P=fbAdapter(fbPlayer);
-  showUi(true,'fb');sync();
-  fbFit();setTimeout(fbFit,400);setTimeout(fbFit,1500);
-  say('已載入並鏡像');
-}
-function fbAdapter(pl){
-  return{
-    playing:()=>fbPlaying,
-    play:()=>{
-      fbAlive=false;pl.play();
-      setTimeout(()=>{
-        if(fbPlayer===pl&&!fbAlive){say('臉書播放器沒有回應，已改用臉書原本的播放器',true);fbFallback()}
-      },6000);
-    },
-    pause:()=>pl.pause(),
-    dur:()=>pl.getDuration()||0,cur:()=>pl.getCurrentPosition()||0,
-    seek:t=>pl.seek(t),
-    muted:()=>pl.isMuted(),toggleMute:()=>pl.isMuted()?pl.unmute():pl.mute(),
-    rate:()=>{}
-  };
-}
-/* 依播放區大小縮放臉書播放器，橫式、直式都自動鋪滿 */
-function fbFit(){
-  const w=$('fbwrap');if(!w)return;
-  const f=w.querySelector('iframe');if(!f)return;
-  const fw=f.offsetWidth,fh=f.offsetHeight;if(!fw||!fh)return;
-  w.style.width=fw+'px';w.style.height=fh+'px';
-  const k=Math.min(view.clientWidth/fw,view.clientHeight/fh);
-  w.style.transform='translate(-50%,-50%) scale('+k+')';
-}
-function fbTeardown(){
-  fbSeq++;
-  fbSubs.forEach(x=>{try{x.release()}catch{}});fbSubs=[];
-  fbPlayer=null;fbPlaying=false;fbMode=null;
-}
+let fbMode=null;
+function fbTeardown(){fbMode=null}
 
 /* YouTube：支援 watch?v=、youtu.be/、/shorts/、/embed/、/live/，以及 t= 開始時間 */
 function ytParse(u){
@@ -355,8 +266,7 @@ async function ytCreate(){
 let P=null, seeking=false, syncTimer=null;
 function showUi(on,kind){
   $('tap').hidden=!on;$('ytbar').hidden=!on;
-  $('tap').classList.toggle('local',kind==='local'||kind==='fb');
-  $('ytspeed').hidden=kind==='fb'; /* 臉書不支援調速 */
+  $('tap').classList.toggle('local',kind==='local');
   clearInterval(syncTimer);syncTimer=on?setInterval(sync,250):null;
   if(!on)P=null;
 }
