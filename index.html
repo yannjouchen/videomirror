@@ -34,16 +34,36 @@ button.off{opacity:.4;cursor:not-allowed}
 .shape button:last-child{border-radius:0 8px 8px 0;border-left:0}
 .shape button[aria-pressed=true]{background:#30363d;color:#fff;border-color:#57606a}
 
-.stage{flex:1;min-height:0;position:relative;display:grid;place-items:center;overflow:hidden;background:var(--stage)}
+.stage{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--stage)}
+.view{flex:1;min-height:0;position:relative;display:grid;place-items:center;overflow:hidden}
 .flip{transform:scaleX(-1);display:grid;place-items:center;width:100%;height:100%}
-.stage iframe{border:0;display:block;background:#000}
-.stage video{display:block;width:100%;height:100%;object-fit:contain;background:#000}
-.empty{transform:scaleX(-1);color:#6e7b88;text-align:center;padding:24px}
-.zoom{position:absolute;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:2;background:rgba(22,27,34,.78);border-color:rgba(255,255,255,.22);backdrop-filter:blur(4px)}
+.flip.off{transform:none}
+.view iframe{border:0;display:block;background:#000}
+.view video{display:block;width:100%;height:100%;object-fit:contain;background:#000}
+.empty{color:#6e7b88;text-align:center;padding:24px}
+.flip:not(.off) .empty{transform:scaleX(-1)}
 .stage.big{position:fixed;inset:0;z-index:50}
 .stage:fullscreen{width:100vw;height:100vh}
 .stage:-webkit-full-screen{width:100vw;height:100vh}
-@media (max-width:520px){.bar h1{display:none}}
+/* 點畫面播放／暫停的透明層；留出「略過廣告」按鈕所在的角落（鏡像時在左下，正常時在右下），讓它能被點到 */
+.tap{position:absolute;inset:0;z-index:1;cursor:pointer;-webkit-tap-highlight-color:transparent;clip-path:polygon(0 0,100% 0,100% 100%,45% 100%,45% 72%,0 72%)}
+.tap.normal{clip-path:polygon(0 0,100% 0,100% 72%,55% 72%,55% 100%,0 100%)}
+.tap .cover{position:absolute;left:0;right:0;top:0;height:22%;background:linear-gradient(#000 55%,transparent);opacity:0;transition:opacity .2s}
+.tap .big-play{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;background:rgba(0,0,0,.6);display:grid;place-items:center;opacity:0;transition:opacity .2s}
+.tap .big-play svg{width:34px;height:34px;fill:#fff;margin-left:4px}
+.tap.paused .big-play,.tap.paused.mirrored .cover{opacity:1}
+/* 操作列在影片下方，不蓋住影片 */
+.ctl{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));background:var(--bar);border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+.ctl button,.ctl select{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:#21262d;color:#fff;font:inherit;font-size:.9rem}
+.ctl .icon{width:40px;height:36px;padding:0;display:grid;place-items:center}
+.ctl .icon svg{width:20px;height:20px;fill:#fff}
+.ytonly{display:flex;align-items:center;gap:8px 10px;flex:1 1 320px;min-width:0}
+.ytonly[hidden]{display:none!important}
+.ctl input[type=range]{flex:1;min-width:80px;accent-color:#ff3b30;height:28px}
+.ctl .time{color:#dfe5ea;font-size:.85rem;white-space:nowrap}
+.ctl .right{display:flex;gap:8px;margin-left:auto}
+#mirror[aria-pressed=false]{background:#5a3b12;border-color:#b7791f}
+@media (max-width:520px){.bar h1{display:none}.ctl{padding-inline:10px}.ctl .time .dur{display:none}}
 </style>
 </head>
 <body>
@@ -60,16 +80,37 @@ button.off{opacity:.4;cursor:not-allowed}
 </header>
 
 <main class="stage" id="stage">
-  <div class="flip" id="flip">
-    <div class="empty">貼上臉書／YouTube 網址，或選擇本機影片</div>
+  <div class="view" id="view">
+    <div class="flip" id="flip">
+      <div class="empty">貼上臉書／YouTube 網址，或選擇本機影片</div>
+    </div>
+    <div class="tap paused mirrored" id="tap" hidden>
+      <div class="cover"></div>
+      <div class="big-play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+    </div>
+    <div class="toast" id="msg" role="status" aria-live="polite"></div>
   </div>
-  <div class="toast" id="msg" role="status" aria-live="polite"></div>
-  <button class="zoom" id="zoom" aria-label="全螢幕">⤢ 全螢幕</button>
+  <div class="ctl">
+    <span class="ytonly" id="ytbar" hidden>
+      <button class="icon" id="ytplay" aria-label="播放"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+      <span class="time"><span id="ytcur">0:00</span><span class="dur"> / <span id="ytdur">0:00</span></span></span>
+      <input type="range" id="ytseek" min="0" max="1000" value="0" aria-label="播放進度">
+      <button class="icon" id="ytmute" aria-label="靜音"></button>
+      <select id="ytspeed" aria-label="播放速度">
+        <option value="0.5">0.5x</option><option value="0.75">0.75x</option>
+        <option value="1" selected>1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option>
+      </select>
+    </span>
+    <span class="right">
+      <button id="mirror" aria-pressed="true">暫停鏡像</button>
+      <button id="zoom" aria-label="全螢幕">⤢ 全螢幕</button>
+    </span>
+  </div>
 </main>
 
 <script>
 const $=id=>document.getElementById(id);
-const flip=$('flip'), msg=$('msg'), stage=$('stage'), zoom=$('zoom');
+const flip=$('flip'), msg=$('msg'), stage=$('stage'), view=$('view'), zoom=$('zoom');
 let fbUrl=null, ytId=null, ytStart=0, portrait=false, objUrl=null;
 
 /* 短暫提示，幾秒後自動消失 */
@@ -80,6 +121,7 @@ function say(t,err){
 }
 function clearStage(){
   if(objUrl){URL.revokeObjectURL(objUrl);objUrl=null}
+  ytTeardown();
   flip.innerHTML='';fbUrl=null;ytId=null;ytStart=0;
   setShare(false);
 }
@@ -91,21 +133,11 @@ function setShare(on){
 /* 依播放區大小，放一個最大的橫式或直式臉書播放器 */
 function buildFrame(){
   if(ytId){
-    const W=stage.clientWidth, H=stage.clientHeight;
-    let f=flip.querySelector('iframe');
-    if(!f){
-      f=document.createElement('iframe');
-      /* fs=0：關掉 YouTube 自己的全螢幕，全螢幕時才不會失去鏡像 */
-      f.src='https://www.youtube.com/embed/'+ytId+'?playsinline=1&rel=0&fs=0'+(ytStart?'&start='+ytStart:'');
-      f.allow='autoplay; encrypted-media; picture-in-picture; web-share';
-      f.referrerPolicy='strict-origin-when-cross-origin';
-      flip.appendChild(f);
-    }
-    f.width=W;f.height=H;
+    if(ytPlayer&&ytPlayer.setSize)ytPlayer.setSize(view.clientWidth,view.clientHeight);
     return;
   }
   if(!fbUrl)return;
-  const W=stage.clientWidth, H=stage.clientHeight, r=portrait?16/9:9/16; /* r = 高/寬 */
+  const W=view.clientWidth, H=view.clientHeight, r=portrait?16/9:9/16; /* r = 高/寬 */
   let w=W, h=Math.round(W*r);
   if(h>H){h=H;w=Math.round(H/r)}
   let f=flip.querySelector('iframe');
@@ -155,14 +187,96 @@ function loadYt(u){
   if(!r){say('找不到這個 YouTube 影片，請確認網址',true);return}
   clearStage();
   ytId=r.id;ytStart=r.sec;
+  $('ytspeed').value='1';
   $('url').value=u;
   $('shape').classList.remove('on'); /* YouTube 會自己調整比例，不需要橫式／直式 */
-  buildFrame();
+  ytCreate();
   srcForShare=u;
   saveToAddress();
   say('已載入並鏡像');
 }
 let srcForShare=null;
+
+/* ===== YouTube：只鏡像畫面，YouTube 自己的按鈕全部隱藏，改用下方不鏡像的操作列 ===== */
+let ytPlayer=null, ytTimer=null, ytSeeking=false, ytApi=null;
+const ICON={
+  play:'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
+  pause:'<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
+  vol:'<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>',
+  mute:'<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm18.6 3-2.8-2.8-1.4 1.4 2.8 2.8-2.8 2.8 1.4 1.4 2.8-2.8 2.8 2.8 1.4-1.4-2.8-2.8 2.8-2.8-1.4-1.4z"/></svg>'
+};
+function loadYtApi(){
+  if(ytApi)return ytApi;
+  ytApi=new Promise(res=>{
+    if(window.YT&&YT.Player)return res();
+    window.onYouTubeIframeAPIReady=()=>res();
+    const sc=document.createElement('script');sc.src='https://www.youtube.com/iframe_api';
+    sc.onerror=()=>{ytApi=null;say('無法連上 YouTube，請檢查網路後再試',true)};
+    document.head.appendChild(sc);
+  });
+  return ytApi;
+}
+function fmt(t){t=Math.max(0,Math.floor(t||0));const h=Math.floor(t/3600),m=Math.floor(t%3600/60),x=String(t%60).padStart(2,'0');return h?h+':'+String(m).padStart(2,'0')+':'+x:m+':'+x}
+async function ytCreate(){
+  const id=ytId,start=ytStart;
+  await loadYtApi();
+  if(id!==ytId)return; /* 等待期間換了影片 */
+  const holder=document.createElement('div');flip.appendChild(holder);
+  ytPlayer=new YT.Player(holder,{
+    width:view.clientWidth,height:view.clientHeight,videoId:id,
+    host:'https://www.youtube.com',
+    playerVars:{controls:0,disablekb:1,fs:0,rel:0,playsinline:1,iv_load_policy:3,modestbranding:1,start:start||0,origin:location.origin},
+    events:{
+      onReady:()=>{ytShowUi(true);ytSync();ytTimer=setInterval(ytSync,250)},
+      onStateChange:e=>{
+        if(e.data===YT.PlayerState.ENDED){ytPlayer.seekTo(0,true);ytPlayer.pauseVideo()} /* 避免結尾出現推薦影片 */
+        ytSync();
+      },
+      onError:e=>{say(e.data===101||e.data===150?'這支影片的上傳者不允許嵌入播放':'YouTube 無法播放這支影片',true)}
+    }
+  });
+}
+function ytShowUi(on){
+  $('tap').hidden=!on;$('ytbar').hidden=!on;
+}
+function ytTeardown(){
+  clearInterval(ytTimer);ytTimer=null;
+  if(ytPlayer&&ytPlayer.destroy){try{ytPlayer.destroy()}catch{}}
+  ytPlayer=null;ytShowUi(false);
+}
+function ytPlaying(){return ytPlayer&&ytPlayer.getPlayerState&&ytPlayer.getPlayerState()===YT.PlayerState.PLAYING}
+function ytSync(){
+  if(!ytPlayer||!ytPlayer.getDuration)return;
+  const d=ytPlayer.getDuration()||0,c=ytPlayer.getCurrentTime()||0,p=ytPlaying();
+  $('ytdur').textContent=fmt(d);
+  if(!ytSeeking){$('ytcur').textContent=fmt(c);$('ytseek').value=d?Math.round(c/d*1000):0}
+  $('ytplay').innerHTML=p?ICON.pause:ICON.play;
+  $('ytplay').setAttribute('aria-label',p?'暫停':'播放');
+  $('tap').classList.toggle('paused',!p);
+  const m=ytPlayer.isMuted();
+  $('ytmute').innerHTML=m?ICON.mute:ICON.vol;
+  $('ytmute').setAttribute('aria-label',m?'取消靜音':'靜音');
+}
+function ytToggle(){if(!ytPlayer)return;ytPlaying()?ytPlayer.pauseVideo():ytPlayer.playVideo();setTimeout(ytSync,80)}
+$('tap').onclick=ytToggle;
+
+/* 暫停鏡像：想看字幕或原本文字時，畫面暫時轉回正常方向 */
+let mirrored=true;
+$('mirror').onclick=()=>{
+  mirrored=!mirrored;
+  flip.classList.toggle('off',!mirrored);
+  $('tap').classList.toggle('mirrored',mirrored);
+  $('tap').classList.toggle('normal',!mirrored);
+  $('mirror').setAttribute('aria-pressed',mirrored);
+  $('mirror').textContent=mirrored?'暫停鏡像':'恢復鏡像';
+  say(mirrored?'已恢復鏡像':'已暫停鏡像，畫面為正常方向');
+};
+$('ytplay').onclick=ytToggle;
+$('ytmute').onclick=()=>{if(!ytPlayer)return;ytPlayer.isMuted()?ytPlayer.unMute():ytPlayer.mute();setTimeout(ytSync,80)};
+$('ytspeed').onchange=e=>{if(ytPlayer)ytPlayer.setPlaybackRate(+e.target.value)};
+$('ytseek').oninput=e=>{ytSeeking=true;const d=ytPlayer?ytPlayer.getDuration():0;$('ytcur').textContent=fmt(d*e.target.value/1000)};
+$('ytseek').onchange=e=>{if(ytPlayer)ytPlayer.seekTo(ytPlayer.getDuration()*e.target.value/1000,true);ytSeeking=false;setTimeout(ytSync,120)};
+
 
 function setShape(p){
   portrait=p;
