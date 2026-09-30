@@ -14,7 +14,8 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
-html,body{height:100%}
+html,body{height:100%;overflow:hidden;max-width:100%}
+@supports (height:100dvh){html,body{height:100dvh}}
 body{margin:0;background:var(--stage);color:var(--fg);font:15px/1.5 var(--sans);display:flex;flex-direction:column;overflow:hidden}
 .bar{flex:none;background:var(--bar);border-bottom:1px solid var(--line);padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top,0px));display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .bar h1{margin:0 6px 0 0;font-size:1rem;font-weight:700;white-space:nowrap}
@@ -57,18 +58,23 @@ button.off{opacity:.4;cursor:not-allowed}
 .tap .big-play svg{width:34px;height:34px;fill:#fff;margin-left:4px}
 .tap.paused .big-play,.tap.paused.mirrored .cover{opacity:1}
 .tap.local{clip-path:none}
+.flip{position:relative}
+.fbwrap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);transform-origin:center}
+.fbwrap iframe{display:block}
 .tap.local .cover{display:none}
 /* 操作列在影片下方，不蓋住影片 */
-.ctl{flex:none;display:flex;flex-wrap:nowrap;align-items:center;gap:8px;transition:opacity .3s;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));background:var(--bar);border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+.ctl{flex:none;min-width:0;max-width:100%;overflow:hidden;display:flex;flex-wrap:nowrap;align-items:center;gap:8px;transition:opacity .3s;padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));background:var(--bar);border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
 .ctl button,.ctl select{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:#21262d;color:#fff;font:inherit;font-size:.9rem}
 .ctl .icon{width:40px;height:36px;padding:0;display:grid;place-items:center}
 .ctl .icon svg{width:20px;height:20px;fill:#fff}
 .ytonly{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0}
 .ytonly[hidden]{display:none!important}
-.ctl input[type=range]{flex:1;min-width:80px;accent-color:#ff3b30;height:28px}
+.ctl input[type=range]{flex:1 1 0;width:0;min-width:40px;accent-color:#ff3b30;height:28px}
 .ctl .time{color:#dfe5ea;font-size:.85rem;white-space:nowrap}
 .ctl .right{display:flex;gap:8px;margin-left:auto;flex:none}
-.ctl select{padding:7px 4px;width:58px}
+.ctl select{padding:7px 4px;width:50px;flex:none;-webkit-appearance:none;appearance:none;text-align:center;text-align-last:center}
+.ctl button{flex:none}
+.stage,.bar{min-width:0;max-width:100%}
 .stage.big .view,.stage:fullscreen .view{position:absolute;inset:0}
 .stage:fullscreen{position:relative}
 .stage.big .ctl,.stage:fullscreen .ctl{position:absolute;left:0;right:0;bottom:0;z-index:4;border-top:0;background:linear-gradient(transparent,rgba(0,0,0,.82) 40%);padding-top:22px}
@@ -83,7 +89,7 @@ button.off{opacity:.4;cursor:not-allowed}
 <body>
 <header class="bar">
   <h1>影片鏡像台</h1>
-  <input id="url" type="url" placeholder="貼上臉書／YouTube／MP4／M3U8 網址，按 Enter">
+  <input id="url" type="url" placeholder="貼上臉書或 YouTube 影片網址，按 Enter">
   <button id="load" class="primary">載入</button>
   <span class="shape" id="shape" role="group" aria-label="影片形狀">
     <button id="land" aria-pressed="true">橫式</button>
@@ -97,7 +103,7 @@ button.off{opacity:.4;cursor:not-allowed}
 <main class="stage" id="stage">
   <div class="view" id="view">
     <div class="flip" id="flip">
-      <div class="empty">貼上 Facebook／YouTube／MP4／M3U8 網址，或選擇本機影片</div>
+      <div class="empty">貼上臉書／YouTube 網址，或選擇本機影片</div>
     </div>
     <div class="tap paused mirrored" id="tap" hidden>
       <div class="cover"></div>
@@ -126,7 +132,8 @@ button.off{opacity:.4;cursor:not-allowed}
 <script>
 const $=id=>document.getElementById(id);
 const flip=$('flip'), msg=$('msg'), stage=$('stage'), view=$('view'), zoom=$('zoom');
-let fbUrl=null, ytId=null, ytStart=0, portrait=false, objUrl=null, directUrl=null;
+let fbUrl=null, ytId=null, ytStart=0, portrait=false, objUrl=null;
+const IOS=/iP(hone|od|ad)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 
 /* 短暫提示，幾秒後自動消失 */
 let tt;
@@ -137,7 +144,8 @@ function say(t,err){
 function clearStage(){
   if(objUrl){URL.revokeObjectURL(objUrl);objUrl=null}
   ytTeardown();
-  flip.innerHTML='';fbUrl=null;ytId=null;ytStart=0;directUrl=null;
+  fbTeardown();
+  flip.innerHTML='';fbUrl=null;ytId=null;ytStart=0;
   setShare(false);
 }
 function setShare(on){
@@ -151,6 +159,7 @@ function buildFrame(){
     if(ytPlayer&&ytPlayer.setSize)ytPlayer.setSize(view.clientWidth,view.clientHeight);
     return;
   }
+  if(fbMode==='sdk'){fbFit();return}
   if(!fbUrl)return;
   const W=view.clientWidth, H=view.clientHeight, r=portrait?16/9:9/16; /* r = 高/寬 */
   let w=W, h=Math.round(W*r);
@@ -159,60 +168,13 @@ function buildFrame(){
   const src='https://www.facebook.com/plugins/video.php?href='+encodeURIComponent(fbUrl)+'&show_text=false&width='+w+'&height='+h;
   if(!f){
     f=document.createElement('iframe');
-    /* Facebook 播放器在跨網域 iframe 裡。外層網頁無法替裡面的 <video> 加 playsinline。
-       這裡刻意不授予 Fullscreen API 權限，只做「盡量留在頁面內」的設定；
-       但 iPhone 上 Facebook 仍可能自行叫出系統播放器，這點無法由 GitHub Pages 強制禁止。 */
-    f.allow='autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share';
-    f.setAttribute('scrolling','no');
-    f.referrerPolicy='strict-origin-when-cross-origin';
+    /* 要允許全螢幕：不允許的話，臉書在 iPhone 上會改用系統播放器，一播放就跳全螢幕、鏡像消失 */
+    f.allow='autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen';
+    f.allowFullscreen=true;
     flip.appendChild(f);
   }
   if(f.width==w&&f.height==h)return;
   f.width=w;f.height=h;f.src=src;
-}
-
-function isIOS(){
-  return /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
-    (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
-}
-function isDirectVideoUrl(u){
-  try{
-    const p=new URL(u).pathname.toLowerCase();
-    return /\.(mp4|m4v|mov|webm|m3u8)$/.test(p);
-  }catch{return false}
-}
-function showBanner(text){
-  $('iabtext').textContent=text;
-  $('iab').hidden=false;
-}
-function hideBanner(){ $('iab').hidden=true; }
-$('iabok').onclick=()=>{hideBanner();setTimeout(buildFrame,50)};
-
-function loadDirect(u){
-  clearStage();
-  hideBanner();
-  directUrl=u;
-  srcForShare=u;
-  $('url').value=u;
-  $('shape').classList.remove('on');
-
-  const vd=document.createElement('video');
-  vd.src=u;
-  vd.controls=false;
-  vd.playsInline=true;
-  vd.preload='metadata';
-  vd.setAttribute('playsinline','');
-  vd.setAttribute('webkit-playsinline','');
-  vd.disablePictureInPicture=true;
-  vd.addEventListener('ended',()=>{vd.currentTime=0;sync()});
-  vd.addEventListener('error',()=>{
-    say('這個直接影片網址無法播放；可能需要登入、禁止跨站存取，或格式不受瀏覽器支援',true);
-  });
-  flip.appendChild(vd);
-  $('ytspeed').value='1';
-  P=videoAdapter(vd);showUi(true,'direct');sync();
-  saveToAddress();
-  say('已用頁內播放器載入並鏡像');
 }
 
 function loadFb(raw,startPortrait){
@@ -221,26 +183,101 @@ function loadFb(raw,startPortrait){
   if(!/^https?:\/\//i.test(u))u='https://'+u;
   let host;
   try{host=new URL(u).hostname}catch{say('網址格式不對，請確認後再貼一次',true);return}
-
   if(/(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com)$/i.test(host)){loadYt(u);return}
-  if(isDirectVideoUrl(u)){loadDirect(u);return}
-  if(!/(^|\.)(facebook\.com|fb\.watch|fb\.com)$/i.test(host)){
-    say('請貼上 Facebook、YouTube，或 MP4／M3U8 等直接影片網址',true);return
-  }
-
+  if(!/(^|\.)(facebook\.com|fb\.watch|fb\.com)$/i.test(host)){say('請貼上臉書或 YouTube 的影片網址',true);return}
   clearStage();
   fbUrl=u;
   $('url').value=u;
-  setShape(!!startPortrait); /* 預設橫式；影片若是直的，按「直式」 */
+  portrait=!!startPortrait;
+  if(IOS){fbIframe();return}  /* iPhone：臉書影片一播放就會被系統全螢幕，只能用臉書原本的播放器 */
+  fbCreate();
+  saveToAddress();
+}
+/* 臉書原本的播放器（按鈕在影片上，會跟著鏡像） */
+function fbIframe(){
+  fbMode='iframe';
+  setShape(portrait); /* 預設橫式；影片若是直的，按「直式」 */
   $('shape').classList.add('on');
+  say('已載入並鏡像');
+}
 
-  if(isIOS()){
-    showBanner('iPhone／iPad：Facebook 嵌入播放器仍可能自行切到系統全螢幕，外層網頁無法強制 playsinline。若一定要保留鏡像，請改用「本機影片」或貼 MP4／M3U8 直接影片網址。');
-    say('Facebook 已載入；iPhone 上無法保證頁內播放');
-  }else{
-    hideBanner();
-    say('Facebook 已載入並鏡像');
-  }
+/* ===== 臉書（電腦、Android）：蓋住臉書的按鈕，改用下方操作列控制，只鏡像畫面 ===== */
+let fbMode=null, fbPlayer=null, fbPlaying=false, fbSeq=0, fbSubs=[], fbSdk=null;
+function loadFbSdk(){
+  if(fbSdk)return fbSdk;
+  fbSdk=new Promise((res,rej)=>{
+    if(window.FB&&FB.XFBML)return res();
+    window.fbAsyncInit=()=>{
+      FB.init({xfbml:false,version:'v21.0'});
+      FB.Event.subscribe('xfbml.ready',onFbReady);
+      res();
+    };
+    if(!$('fb-root')){const r=document.createElement('div');r.id='fb-root';document.body.prepend(r)}
+    const sc=document.createElement('script');
+    sc.src='https://connect.facebook.net/zh_TW/sdk.js';sc.async=true;sc.crossOrigin='anonymous';
+    sc.onerror=()=>{fbSdk=null;rej()};
+    document.body.appendChild(sc);
+  });
+  return fbSdk;
+}
+function fbCreate(){
+  const seq=++fbSeq;
+  fbMode='sdk';
+  $('shape').classList.remove('on');
+  const wrap=document.createElement('div');wrap.className='fbwrap';wrap.id='fbwrap';
+  const d=document.createElement('div');
+  d.className='fb-video';d.id='fbv'+seq;
+  d.setAttribute('data-href',fbUrl);
+  d.setAttribute('data-width','720');
+  d.setAttribute('data-show-text','false');
+  d.setAttribute('data-allowfullscreen','false');
+  d.setAttribute('data-autoplay','false');
+  wrap.appendChild(d);flip.appendChild(wrap);
+  say('載入中…');
+  /* 臉書工具沒有回應時，改用臉書原本的播放器 */
+  setTimeout(()=>{if(seq===fbSeq&&!fbPlayer)fbFallback()},10000);
+  loadFbSdk().then(()=>{if(seq===fbSeq)FB.XFBML.parse(wrap)}).catch(()=>{if(seq===fbSeq)fbFallback()});
+}
+function fbFallback(){
+  const w=$('fbwrap');if(w)w.remove();
+  fbSeq++;fbMode=null;
+  fbIframe();
+}
+function onFbReady(m){
+  if(m.type!=='video'||m.id!=='fbv'+fbSeq||fbMode!=='sdk')return;
+  fbPlayer=m.instance;fbPlaying=false;
+  const on=(ev,fn)=>{try{fbSubs.push(fbPlayer.subscribe(ev,fn))}catch{}};
+  on('startedPlaying',()=>{fbPlaying=true;sync()});
+  on('paused',()=>{fbPlaying=false;sync()});
+  on('finishedPlaying',()=>{fbPlaying=false;try{fbPlayer.seek(0)}catch{};sync()});
+  on('error',()=>say('臉書無法播放這支影片，可能是影片非公開',true));
+  P=fbAdapter(fbPlayer);
+  showUi(true,'fb');sync();
+  fbFit();setTimeout(fbFit,400);setTimeout(fbFit,1500);
+  say('已載入並鏡像');
+}
+function fbAdapter(pl){
+  return{
+    playing:()=>fbPlaying,
+    play:()=>pl.play(),pause:()=>pl.pause(),
+    dur:()=>pl.getDuration()||0,cur:()=>pl.getCurrentPosition()||0,
+    seek:t=>pl.seek(t),
+    muted:()=>pl.isMuted(),toggleMute:()=>pl.isMuted()?pl.unmute():pl.mute(),
+    rate:()=>{}
+  };
+}
+/* 依播放區大小縮放臉書播放器，橫式、直式都自動鋪滿 */
+function fbFit(){
+  const w=$('fbwrap');if(!w)return;
+  const f=w.querySelector('iframe');if(!f)return;
+  const fw=f.offsetWidth,fh=f.offsetHeight;if(!fw||!fh)return;
+  const k=Math.min(view.clientWidth/fw,view.clientHeight/fh);
+  w.style.transform='translate(-50%,-50%) scale('+k+')';
+}
+function fbTeardown(){
+  fbSeq++;
+  fbSubs.forEach(x=>{try{x.release()}catch{}});fbSubs=[];
+  fbPlayer=null;fbPlaying=false;fbMode=null;
 }
 
 /* YouTube：支援 watch?v=、youtu.be/、/shorts/、/embed/、/live/，以及 t= 開始時間 */
@@ -311,11 +348,12 @@ async function ytCreate(){
     }
   });
 }
-/* 下方操作列透過 P 控制目前的播放器（YouTube、直接影片或本機影片） */
+/* 下方操作列透過 P 控制目前的播放器（YouTube 或本機影片） */
 let P=null, seeking=false, syncTimer=null;
 function showUi(on,kind){
   $('tap').hidden=!on;$('ytbar').hidden=!on;
-  $('tap').classList.toggle('local',kind==='local'||kind==='direct');
+  $('tap').classList.toggle('local',kind==='local'||kind==='fb');
+  $('ytspeed').hidden=kind==='fb'; /* 臉書不支援調速 */
   clearInterval(syncTimer);syncTimer=on?setInterval(sync,250):null;
   if(!on)P=null;
 }
@@ -389,11 +427,11 @@ function setShape(p){
 function shareLink(){
   const base=location.href.split('#')[0].split('?')[0];
   /* openExternalBrowser=1：在 LINE 裡點連結時，會直接用手機的瀏覽器開啟 */
-  if(ytId||directUrl)return base+'?v='+encodeURIComponent(srcForShare)+'&openExternalBrowser=1';
+  if(ytId)return base+'?v='+encodeURIComponent(srcForShare)+'&openExternalBrowser=1';
   return base+'?v='+encodeURIComponent(fbUrl)+(portrait?'&s=p':'')+'&openExternalBrowser=1';
 }
 function saveToAddress(){
-  if(!fbUrl&&!ytId&&!directUrl)return;
+  if(!fbUrl&&!ytId)return;
   try{history.replaceState(null,'',shareLink())}catch{}
   setShare(true);
 }
@@ -407,7 +445,7 @@ function copyText(t){
 }
 $('share').onclick=async()=>{
   if($('share').classList.contains('off')){
-    say(objUrl?'本機影片只在你的裝置上播放，無法分享':'請先載入 Facebook、YouTube 或直接影片網址',true);return;
+    say(objUrl?'本機影片只在你的裝置上播放，無法分享':'請先載入臉書或 YouTube 影片',true);return;
   }
   const link=shareLink();
   if(navigator.share&&/^https?:/.test(location.protocol)){
@@ -432,7 +470,6 @@ document.addEventListener('paste',e=>{
 $('file').onchange=e=>{
   const file=e.target.files[0];if(!file)return;
   clearStage();
-  hideBanner();
   $('shape').classList.remove('on');
   objUrl=URL.createObjectURL(file);
   const vd=document.createElement('video');
@@ -484,7 +521,7 @@ document.addEventListener('webkitfullscreenchange',updateZoom);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&stage.classList.contains('big')){stage.classList.remove('big');updateZoom()}});
 let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(buildFrame,250)});
 
-/* App 內建瀏覽器（LINE、Threads、Facebook、IG）可能限制媒體播放或把影片交給系統播放器 */
+/* App 內建瀏覽器（LINE、Threads、臉書、IG）在 iPhone 上會強制影片全螢幕，鏡像會消失 */
 (function(){
   const ua=navigator.userAgent;
   const app=/\bLine\//i.test(ua)?'LINE':/Barcelona/i.test(ua)?'Threads':/Instagram/i.test(ua)?'Instagram':/FBAN|FBAV|FB_IAB/.test(ua)?'臉書':'';
@@ -494,7 +531,9 @@ let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(buil
     location.replace(location.href+(location.search?'&':'?')+'openExternalBrowser=1');
     return;
   }
-  showBanner('你正在 '+app+' 裡開啟這個網頁，內建瀏覽器可能限制影片播放。請按右上角或右下角選單，選「用瀏覽器開啟」或「在 Safari 中開啟」。');
+  $('iabtext').textContent='你正在 '+app+' 裡開啟這個網頁，影片可能會自動全螢幕、鏡像消失。請按右上角或右下角的選單，選「用瀏覽器開啟」或「在 Safari 中開啟」。';
+  $('iab').hidden=false;
+  $('iabok').onclick=()=>{$('iab').hidden=true;setTimeout(buildFrame,50)};
 })();
 
 /* 從分享連結打開：自動載入影片 */
