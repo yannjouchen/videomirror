@@ -42,6 +42,14 @@ button:focus-visible,input:focus-visible,.filebtn:focus-within{outline:2px solid
 .stage video{display:block;max-width:100%;max-height:75vh}
 .empty{color:#8b98a8;text-align:center;padding:40px 16px}
 .state{font-family:var(--mono);font-size:.82rem;color:var(--muted)}
+.stage{position:relative;cursor:zoom-in}
+.zoom{position:absolute;right:10px;bottom:10px;z-index:2;background:rgba(15,20,26,.72);color:#fff;border:1px solid rgba(255,255,255,.25);backdrop-filter:blur(4px)}
+.stage.big{position:fixed;inset:0;z-index:50;border-radius:0;min-height:0;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px);cursor:zoom-out;background:#000}
+.stage:fullscreen{border-radius:0;padding:0;cursor:zoom-out;background:#000}
+.stage:-webkit-full-screen{border-radius:0;padding:0;cursor:zoom-out;background:#000}
+.stage.big video,.stage:fullscreen video{max-height:100vh;max-width:100vw;width:100vw;height:100vh;object-fit:contain}
+.stage:-webkit-full-screen video{max-height:100vh;max-width:100vw;width:100vw;height:100vh;object-fit:contain}
+body.lock{overflow:hidden}
 @media (prefers-reduced-motion:reduce){.flip{transition:none}}
 </style>
 </head>
@@ -68,12 +76,13 @@ button:focus-visible,input:focus-visible,.filebtn:focus-within{outline:2px solid
       <button id="fv" aria-pressed="false">上下翻轉</button>
       <span class="state" id="state">scaleX(-1)</span>
     </div>
-    <div class="stage">
+    <div class="stage" id="stage" title="雙擊畫面可放大／縮小">
       <div class="flip" id="flip">
         <div class="empty" id="empty">影片會顯示在這裡</div>
       </div>
+      <button class="zoom" id="zoom" aria-label="放大播放畫面">⤢ 放大</button>
     </div>
-    <p class="msg">提示：臉書影片的播放按鈕也會一起被鏡像，這是正常的。只有「公開」的影片可以嵌入。</p>
+    <p class="msg">提示：請用右下角「放大」按鈕（或雙擊畫面）全螢幕，才會保持鏡像；按 Esc 或再按一次即可縮小。臉書的播放按鈕也會一起被鏡像，這是正常的。只有「公開」的影片可以嵌入。</p>
   </section>
 </div>
 
@@ -107,17 +116,57 @@ function loadFb(raw){
   try{host=new URL(u).hostname}catch{say('網址格式不對，請確認後再貼一次',true);return}
   if(!/(^|\.)(facebook\.com|fb\.watch|fb\.com)$/i.test(host)){say('這不是臉書網址',true);return}
   const isReel=/\/reel\//i.test(u);
-  const w=Math.min(isReel?360:720, flip.parentElement.clientWidth-24);
-  const hgt=isReel?Math.round(w*16/9):Math.round(w*9/16);
+  ratio=isReel?16/9:9/16;
   clearStage();
   const f=document.createElement('iframe');
-  f.src='https://www.facebook.com/plugins/video.php?href='+encodeURIComponent(u)+'&show_text=false&width='+w;
-  f.width=w; f.height=hgt;
+  f.src='https://www.facebook.com/plugins/video.php?href='+encodeURIComponent(u)+'&show_text=false&width=720';
+  /* 不開放臉書自己的全螢幕，避免全螢幕時失去鏡像 */
   f.allow='autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share';
-  f.allowFullscreen=true;
   flip.appendChild(f);
+  sizeFrame();
   say(/fb\.watch/i.test(host)?'已載入。fb.watch 短網址有時無法嵌入，若沒畫面請改用完整網址。':'已載入。若沒畫面，可能是影片非公開。');
 }
+
+/* 依舞台大小調整臉書播放器尺寸（ratio = 高/寬） */
+let ratio=9/16;
+function sizeFrame(){
+  const f=flip.querySelector('iframe'); if(!f)return;
+  const big=isBig();
+  const maxW=big?window.innerWidth:Math.min(ratio>1?360:720, stage.clientWidth-24);
+  const maxH=big?window.innerHeight:Infinity;
+  let w=maxW, hh=Math.round(w*ratio);
+  if(hh>maxH){hh=maxH;w=Math.round(hh/ratio)}
+  f.width=w; f.height=hh;
+}
+
+/* 放大：優先用瀏覽器全螢幕（對整個舞台，所以鏡像會保留）；iPhone 等不支援時改用滿版覆蓋 */
+const stage=$('stage'), zoom=$('zoom');
+const fsEl=()=>document.fullscreenElement||document.webkitFullscreenElement;
+const isBig=()=>fsEl()===stage||stage.classList.contains('big');
+function updateZoom(){
+  const b=isBig();
+  zoom.textContent=b?'⤡ 縮小':'⤢ 放大';
+  zoom.setAttribute('aria-label',b?'縮小播放畫面':'放大播放畫面');
+  document.body.classList.toggle('lock',stage.classList.contains('big'));
+  sizeFrame();
+}
+function enterBig(){
+  const req=stage.requestFullscreen||stage.webkitRequestFullscreen;
+  if(req){
+    Promise.resolve(req.call(stage)).catch(()=>{stage.classList.add('big');updateZoom()});
+  }else{stage.classList.add('big');updateZoom()}
+}
+function exitBig(){
+  if(fsEl()){(document.exitFullscreen||document.webkitExitFullscreen).call(document)}
+  stage.classList.remove('big');updateZoom();
+}
+function toggleBig(){isBig()?exitBig():enterBig()}
+zoom.onclick=e=>{e.stopPropagation();toggleBig()};
+stage.addEventListener('dblclick',toggleBig);
+document.addEventListener('fullscreenchange',updateZoom);
+document.addEventListener('webkitfullscreenchange',updateZoom);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&stage.classList.contains('big'))exitBig()});
+window.addEventListener('resize',sizeFrame);
 
 $('load').onclick=()=>loadFb($('url').value);
 $('url').addEventListener('keydown',e=>{if(e.key==='Enter')loadFb($('url').value)});
@@ -133,6 +182,10 @@ $('file').onchange=e=>{
   objUrl=URL.createObjectURL(file);
   const vd=document.createElement('video');
   vd.src=objUrl; vd.controls=true; vd.playsInline=true;
+  vd.setAttribute('playsinline','');vd.setAttribute('webkit-playsinline','');
+  /* 關掉影片內建的全螢幕，改用上面的「放大」，鏡像才不會消失 */
+  vd.setAttribute('controlsList','nofullscreen');
+  vd.disablePictureInPicture=true;
   flip.appendChild(vd);
   say('已載入本機影片：'+file.name);
 };
