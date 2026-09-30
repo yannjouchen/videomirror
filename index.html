@@ -23,6 +23,10 @@ button,.filebtn{padding:8px 12px;border-radius:8px;border:1px solid var(--line);
 button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 button:focus-visible,input:focus-visible,.filebtn:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 .filebtn input{display:none}
+.iab{flex-basis:100%;margin:0;display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:#3a2a0c;border:1px solid #b7791f;color:#ffd58a;font-size:.88rem}
+.iab span{flex:1;min-width:0}
+.iab[hidden]{display:none}
+.iab button{flex:none;padding:5px 10px;font-size:.85rem}
 button.off{opacity:.4;cursor:not-allowed}
 .toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:3;max-width:calc(100% - 32px);padding:8px 14px;border-radius:8px;background:rgba(22,27,34,.9);color:var(--fg);font-size:.9rem;text-align:center;opacity:0;pointer-events:none;transition:opacity .25s}
 .toast.show{opacity:1}
@@ -87,6 +91,7 @@ button.off{opacity:.4;cursor:not-allowed}
   </span>
   <label class="filebtn">本機影片<input id="file" type="file" accept="video/*"></label>
   <button id="share" class="off" aria-disabled="true">分享連結</button>
+  <p class="iab" id="iab" hidden><span id="iabtext"></span><button id="iabok">知道了</button></p>
 </header>
 
 <main class="stage" id="stage">
@@ -175,8 +180,7 @@ function loadFb(raw,startPortrait){
   $('url').value=u;
   setShape(!!startPortrait); /* 預設橫式；影片若是直的，按「直式」 */
   $('shape').classList.add('on');
-  const iOS=/iP(hone|od|ad)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
-  say(iOS?'提醒：iPhone 播放臉書影片時，系統會自動全螢幕並取消鏡像，建議下載影片後用「本機影片」播放':'已載入並鏡像',iOS);
+  say('已載入並鏡像');
 }
 
 /* YouTube：支援 watch?v=、youtu.be/、/shorts/、/embed/、/live/，以及 t= 開始時間 */
@@ -324,8 +328,9 @@ function setShape(p){
 /* 把影片網址與橫直設定記在網頁網址上（?v=…&s=p），別人打開就會直接載入 */
 function shareLink(){
   const base=location.href.split('#')[0].split('?')[0];
-  if(ytId)return base+'?v='+encodeURIComponent(srcForShare);
-  return base+'?v='+encodeURIComponent(fbUrl)+(portrait?'&s=p':'');
+  /* openExternalBrowser=1：在 LINE 裡點連結時，會直接用手機的瀏覽器開啟 */
+  if(ytId)return base+'?v='+encodeURIComponent(srcForShare)+'&openExternalBrowser=1';
+  return base+'?v='+encodeURIComponent(fbUrl)+(portrait?'&s=p':'')+'&openExternalBrowser=1';
 }
 function saveToAddress(){
   if(!fbUrl&&!ytId)return;
@@ -417,6 +422,21 @@ document.addEventListener('fullscreenchange',updateZoom);
 document.addEventListener('webkitfullscreenchange',updateZoom);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&stage.classList.contains('big')){stage.classList.remove('big');updateZoom()}});
 let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(buildFrame,250)});
+
+/* App 內建瀏覽器（LINE、Threads、臉書、IG）在 iPhone 上會強制影片全螢幕，鏡像會消失 */
+(function(){
+  const ua=navigator.userAgent;
+  const app=/\bLine\//i.test(ua)?'LINE':/Barcelona/i.test(ua)?'Threads':/Instagram/i.test(ua)?'Instagram':/FBAN|FBAV|FB_IAB/.test(ua)?'臉書':'';
+  if(!app)return;
+  if(app==='LINE'&&!/openExternalBrowser=1/.test(location.search)){
+    /* LINE 支援這個參數，重新開啟時會跳到手機的瀏覽器 */
+    location.replace(location.href+(location.search?'&':'?')+'openExternalBrowser=1');
+    return;
+  }
+  $('iabtext').textContent='你正在 '+app+' 裡開啟這個網頁，影片可能會自動全螢幕、鏡像消失。請按右上角或右下角的選單，選「用瀏覽器開啟」或「在 Safari 中開啟」。';
+  $('iab').hidden=false;
+  $('iabok').onclick=()=>{$('iab').hidden=true;setTimeout(buildFrame,50)};
+})();
 
 /* 從分享連結打開：自動載入影片 */
 (function(){
