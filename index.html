@@ -25,6 +25,8 @@ button:focus-visible,input:focus-visible,.filebtn:focus-within{outline:2px solid
 .filebtn input{display:none}
 .msg{flex-basis:100%;margin:0;color:var(--muted);font-size:.85rem}
 .msg.err{color:var(--err)}
+.sharebox{flex-basis:100%;display:flex;gap:8px}
+.sharebox input{flex:1;min-width:0;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#0d1117;color:var(--fg);font:inherit;font-size:.85rem}
 .shape{display:none;gap:0}
 .shape.on{display:inline-flex}
 .shape button{border-radius:0}
@@ -54,7 +56,12 @@ button:focus-visible,input:focus-visible,.filebtn:focus-within{outline:2px solid
     <button id="port" aria-pressed="false">直式</button>
   </span>
   <label class="filebtn">本機影片<input id="file" type="file" accept="video/*"></label>
+  <button id="share" hidden>分享連結</button>
   <p id="msg" class="msg">在頁面任何地方按 Ctrl+V / ⌘V 也能直接貼上網址。影片會自動鏡像。</p>
+  <div class="sharebox" id="sharebox" hidden>
+    <input id="shareurl" type="text" readonly aria-label="分享連結">
+    <button id="copy" class="primary">複製</button>
+  </div>
 </header>
 
 <main class="stage" id="stage">
@@ -70,7 +77,11 @@ const flip=$('flip'), msg=$('msg'), stage=$('stage'), zoom=$('zoom');
 let fbUrl=null, portrait=false, objUrl=null;
 
 function say(t,err){msg.textContent=t;msg.className='msg'+(err?' err':'')}
-function clearStage(){if(objUrl){URL.revokeObjectURL(objUrl);objUrl=null}flip.innerHTML='';fbUrl=null}
+function clearStage(){
+  if(objUrl){URL.revokeObjectURL(objUrl);objUrl=null}
+  flip.innerHTML='';fbUrl=null;
+  $('share').hidden=true;$('sharebox').hidden=true;
+}
 
 /* 依播放區大小，放一個最大的橫式或直式臉書播放器 */
 function buildFrame(){
@@ -90,7 +101,7 @@ function buildFrame(){
   f.width=w;f.height=h;f.src=src;
 }
 
-function loadFb(raw){
+function loadFb(raw,startPortrait){
   let u=(raw||'').trim();
   if(!u){say('請先貼上網址',true);return}
   if(!/^https?:\/\//i.test(u))u='https://'+u;
@@ -99,7 +110,8 @@ function loadFb(raw){
   if(!/(^|\.)(facebook\.com|fb\.watch|fb\.com)$/i.test(host)){say('這不是臉書網址',true);return}
   clearStage();
   fbUrl=u;
-  setShape(false); /* 預設橫式；影片若是直的，按「直式」 */
+  $('url').value=u;
+  setShape(!!startPortrait); /* 預設橫式；影片若是直的，按「直式」 */
   $('shape').classList.add('on');
   say('已載入並鏡像。如果畫面上下有很多黑邊，切換「橫式／直式」即可鋪滿。沒畫面的話，可能是影片非公開。');
 }
@@ -110,7 +122,36 @@ function setShape(p){
   $('port').setAttribute('aria-pressed',p);
   const f=flip.querySelector('iframe');if(f)f.remove();
   buildFrame();
+  saveToAddress();
 }
+
+/* 把影片網址與橫直設定記在網頁網址上（?v=…&s=p），別人打開就會直接載入 */
+function shareLink(){
+  const base=location.href.split('#')[0].split('?')[0];
+  return base+'?v='+encodeURIComponent(fbUrl)+(portrait?'&s=p':'');
+}
+function saveToAddress(){
+  if(!fbUrl)return;
+  try{history.replaceState(null,'',shareLink())}catch{}
+  $('share').hidden=false;
+  $('shareurl').value=shareLink();
+}
+$('share').onclick=async()=>{
+  const link=shareLink();
+  if(navigator.share&&/^https?:/.test(location.protocol)){
+    try{await navigator.share({title:'鏡像影片',url:link});return}catch(e){if(e.name==='AbortError')return}
+  }
+  $('shareurl').value=link;
+  $('sharebox').hidden=!$('sharebox').hidden;
+  if(!$('sharebox').hidden)$('shareurl').select();
+};
+$('copy').onclick=async()=>{
+  const inp=$('shareurl');
+  try{await navigator.clipboard.writeText(inp.value);say('已複製分享連結，貼給朋友就能直接看鏡像影片。')}
+  catch{inp.focus();inp.select();say('請按 Ctrl+C / ⌘C 複製已選取的連結。')}
+};
+if(location.protocol==='file:')
+  $('share').title='提醒：這個網頁目前是存在你電腦裡的檔案，要先放到網路上，別人才打得開分享連結';
 $('land').onclick=()=>setShape(false);
 $('port').onclick=()=>setShape(true);
 
@@ -134,7 +175,8 @@ $('file').onchange=e=>{
   vd.setAttribute('controlsList','nofullscreen');
   vd.disablePictureInPicture=true;
   flip.appendChild(vd);
-  say('已載入並鏡像：'+file.name);
+  try{history.replaceState(null,'',location.href.split('?')[0])}catch{}
+  say('已載入並鏡像：'+file.name+'（本機影片只在你的裝置上播放，無法分享連結）');
 };
 
 /* 全螢幕：對整個播放區，鏡像會保留；iPhone 不支援時改成鋪滿整頁 */
@@ -159,6 +201,16 @@ document.addEventListener('fullscreenchange',updateZoom);
 document.addEventListener('webkitfullscreenchange',updateZoom);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&stage.classList.contains('big')){stage.classList.remove('big');updateZoom()}});
 let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(buildFrame,250)});
+
+/* 從分享連結打開：自動載入影片 */
+(function(){
+  const q=new URLSearchParams(location.search);
+  const v=q.get('v');
+  if(v){
+    loadFb(v,q.get('s')==='p');
+    say('這是分享給你的鏡像影片，按播放鍵即可觀看。');
+  }
+})();
 </script>
 </body>
 </html>
